@@ -687,12 +687,25 @@
 
       <!-- 월간 요약 패널 -->
       <div id="panel-monthly">
-        <div class="stat2-grid">
-          <div class="stat2-card full blue"><div class="stat2-label">총 방문 인원</div><div><span class="stat2-val" id="ms-total">0</span><span class="stat2-unit">명</span></div></div>
-          <div class="stat2-card purple"><div class="stat2-label">운영 일수</div><div><span class="stat2-val" id="ms-days">0</span><span class="stat2-unit">일</span></div></div>
-          <div class="stat2-card purple"><div class="stat2-label">단체 방문 총 인원</div><div><span class="stat2-val" id="ms-group">0</span><span class="stat2-unit">명</span></div></div>
+        <!-- 선택 공간 표시 -->
+        <div id="ms-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:linear-gradient(135deg,#00838F,#00ACC1);border-radius:14px;margin-bottom:12px">
+          <div style="color:rgba(255,255,255,.8);font-size:.78rem;font-weight:700">📍 현재 보기</div>
+          <div id="ms-space-label" style="color:#fff;font-size:.92rem;font-weight:900">전 체</div>
         </div>
-        <div style="font-size:.82rem;font-weight:800;color:#7986CB;margin-bottom:8px;padding-left:2px">📊 연령대별 현황</div>
+        <!-- 핵심 수치 -->
+        <div class="stat2-grid">
+          <div class="stat2-card full blue">
+            <div class="stat2-label">총 방문 인원</div>
+            <div style="display:flex;align-items:baseline;justify-content:center;gap:12px">
+              <span class="stat2-val" id="ms-total">0</span><span class="stat2-unit">명</span>
+              <span style="font-size:.78rem;color:#4DD0E1">👦 <span id="ms-male">0</span> / 👧 <span id="ms-female">0</span></span>
+            </div>
+          </div>
+          <div class="stat2-card purple"><div class="stat2-label">운영 일수</div><div><span class="stat2-val" id="ms-days">0</span><span class="stat2-unit">일</span></div></div>
+          <div class="stat2-card purple"><div class="stat2-label">단체 방문 인원</div><div><span class="stat2-val" id="ms-group">0</span><span class="stat2-unit">명</span></div></div>
+        </div>
+        <!-- 연령대 -->
+        <div style="font-size:.82rem;font-weight:800;color:#00838F;margin-bottom:8px;padding-left:2px;display:flex;align-items:center;gap:6px">📊 연령대별 현황 <span style="font-size:.72rem;color:#80CBC4;font-weight:600">(남녀 비율 추정)</span></div>
         <div class="age-gender-grid">
           <div class="age-gender-card male"><div class="ag-icon">👦</div><div class="ag-label">남 초등</div><div class="ag-val" id="ag-male-elem">0</div></div>
           <div class="age-gender-card female"><div class="ag-icon">👧</div><div class="ag-label">여 초등</div><div class="ag-val" id="ag-female-elem">0</div></div>
@@ -705,9 +718,12 @@
           <div class="age-gender-card male"><div class="ag-icon">👦</div><div class="ag-label">남 성인</div><div class="ag-val" id="ag-male-adult">0</div></div>
           <div class="age-gender-card female"><div class="ag-icon">👧</div><div class="ag-label">여 성인</div><div class="ag-val" id="ag-female-adult">0</div></div>
         </div>
-        <div style="margin-top:12px">
-          <button class="dl-btn" onclick="downloadExcel()">📥 엑셀 다운로드</button>
+        <!-- 전체 선택 시: 공간별 소계 -->
+        <div id="space-summary" style="margin-top:4px;margin-bottom:12px">
+          <div style="font-size:.82rem;font-weight:800;color:#00838F;margin-bottom:8px;padding-left:2px">🏠 공간별 방문 현황 <span style="font-size:.72rem;color:#80CBC4;font-weight:600">(탭하면 해당 공간 통계로 이동)</span></div>
+          <div id="space-summary-list"></div>
         </div>
+        <button class="dl-btn" onclick="downloadExcel()">📥 엑셀 다운로드</button>
       </div>
 
       <!-- 일별 현황 패널 -->
@@ -1204,14 +1220,20 @@ async function loadAdminStats(){
 }
 
 function renderSpaceTabs(data){
+  adminSpaceFilter='전체';
   const names=['전체',...new Set(data.map(r=>r.space_name).filter(Boolean))];
   const row=document.getElementById('space-tab-row');
-  row.innerHTML=names.map(n=>`<button class="space-tab-chip${n===adminSpaceFilter?' active':''}" onclick="selectSpaceTab('${n}')">${n==='전체'?'🏠 전체':n}</button>`).join('');
+  row.innerHTML=names.map(n=>{
+    const em=n==='전체'?'🏠':spaceEmoji(n);
+    return`<button class="space-tab-chip${n==='전체'?' active':''}" onclick="selectSpaceTab('${n}')">${em} ${n}</button>`;
+  }).join('');
 }
 
 function selectSpaceTab(name){
   adminSpaceFilter=name;
-  document.querySelectorAll('.space-tab-chip').forEach(b=>b.classList.toggle('active',b.textContent.replace('🏠 ','')===name||b.textContent===name));
+  document.querySelectorAll('.space-tab-chip').forEach(b=>{
+    b.classList.toggle('active', b.getAttribute('onclick')===`selectSpaceTab('${name}')`);
+  });
   const filtered=name==='전체'?adminStatsData:adminStatsData.filter(r=>r.space_name===name);
   renderMonthlyStats(filtered,name);
   if(document.getElementById('panel-daily').style.display!=='none')renderDailyStats(filtered,name);
@@ -1219,26 +1241,68 @@ function selectSpaceTab(name){
 
 function renderMonthlyStats(data,spaceName){
   const total=data.reduce((s,r)=>s+(r.headcount||0),0);
-  const days=new Set(data.map(r=>r.created_at?.slice(0,10))).size;
+  const male=data.reduce((s,r)=>s+(r.male_count||0),0);
+  const female=data.reduce((s,r)=>s+(r.female_count||0),0);
+  const days=new Set(data.filter(r=>r.created_at).map(r=>r.created_at.slice(0,10))).size;
   const group=data.filter(r=>(r.headcount||0)>=10).reduce((s,r)=>s+(r.headcount||0),0);
+  const sum=(key)=>data.reduce((s,r)=>s+(r[key]||0),0);
+
+  // 핵심 수치 업데이트
   document.getElementById('ms-total').textContent=total;
   document.getElementById('ms-days').textContent=days;
   document.getElementById('ms-group').textContent=group;
-  const sum=(key)=>data.reduce((s,r)=>s+(r[key]||0),0);
-  // 남성/여성 연령대 분리는 DB에 없으므로 전체 연령대만 표시 (성별 미분리)
-  const male=data.reduce((s,r)=>s+(r.male_count||0),0);
-  const female=data.reduce((s,r)=>s+(r.female_count||0),0);
-  const ratio=total>0?Math.round(male/total*100):0;
-  document.getElementById('ag-male-elem').textContent=sum('cnt_elem')>0?Math.round(sum('cnt_elem')*male/(male+female||1)):0;
-  document.getElementById('ag-female-elem').textContent=sum('cnt_elem')>0?Math.round(sum('cnt_elem')*female/(male+female||1)):0;
-  document.getElementById('ag-male-middle').textContent=sum('cnt_middle')>0?Math.round(sum('cnt_middle')*male/(male+female||1)):0;
-  document.getElementById('ag-female-middle').textContent=sum('cnt_middle')>0?Math.round(sum('cnt_middle')*female/(male+female||1)):0;
-  document.getElementById('ag-male-high').textContent=sum('cnt_high')>0?Math.round(sum('cnt_high')*male/(male+female||1)):0;
-  document.getElementById('ag-female-high').textContent=sum('cnt_high')>0?Math.round(sum('cnt_high')*female/(male+female||1)):0;
-  document.getElementById('ag-male-univ').textContent=sum('cnt_univ')>0?Math.round(sum('cnt_univ')*male/(male+female||1)):0;
-  document.getElementById('ag-female-univ').textContent=sum('cnt_univ')>0?Math.round(sum('cnt_univ')*female/(male+female||1)):0;
-  document.getElementById('ag-male-adult').textContent=sum('cnt_adult')>0?Math.round(sum('cnt_adult')*male/(male+female||1)):0;
-  document.getElementById('ag-female-adult').textContent=sum('cnt_adult')>0?Math.round(sum('cnt_adult')*female/(male+female||1)):0;
+  const maleEl=document.getElementById('ms-male');
+  const femaleEl=document.getElementById('ms-female');
+  if(maleEl)maleEl.textContent=male;
+  if(femaleEl)femaleEl.textContent=female;
+
+  // 현재 선택 공간 레이블
+  const labelEl=document.getElementById('ms-space-label');
+  if(labelEl)labelEl.textContent=spaceName==='전체'?'전 체':spaceName;
+
+  // 연령대별 (남녀 비율로 추정 배분)
+  const mR=total>0?male/total:0.5;
+  const fR=1-mR;
+  ['elem','middle','high','univ','adult'].forEach(k=>{
+    const t=sum('cnt_'+k);
+    const mEl=document.getElementById('ag-male-'+k);
+    const fEl=document.getElementById('ag-female-'+k);
+    if(mEl)mEl.textContent=Math.round(t*mR);
+    if(fEl)fEl.textContent=Math.round(t*fR);
+  });
+
+  // 공간별 소계 (전체 탭일 때만 표시)
+  const summaryWrap=document.getElementById('space-summary');
+  const summaryList=document.getElementById('space-summary-list');
+  if(!summaryWrap||!summaryList)return;
+
+  if(spaceName==='전체'){
+    const spaceMap={};
+    data.forEach(r=>{
+      if(!r.space_name)return;
+      if(!spaceMap[r.space_name])spaceMap[r.space_name]={total:0,male:0,female:0};
+      spaceMap[r.space_name].total+=(r.headcount||0);
+      spaceMap[r.space_name].male+=(r.male_count||0);
+      spaceMap[r.space_name].female+=(r.female_count||0);
+    });
+    const entries=Object.entries(spaceMap).sort((a,b)=>b[1].total-a[1].total);
+    summaryList.innerHTML=entries.length===0
+      ?'<p style="color:#9FA8DA;text-align:center;padding:16px;font-size:.85rem">이번 달 이용 기록이 없습니다</p>'
+      :entries.map(([n,v])=>`
+        <div onclick="selectSpaceTab('${n}')" style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;background:#fff;border-radius:13px;margin-bottom:8px;border:1.5px solid #B2EBF2;cursor:pointer;transition:all .18s" onmouseover="this.style.background='#E0F7FA'" onmouseout="this.style.background='#fff'">
+          <div style="display:flex;align-items:center;gap:9px">
+            <span style="font-size:1.3rem">${spaceEmoji(n)}</span>
+            <span style="font-size:.88rem;font-weight:800;color:#00838F">${n}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:.75rem;color:#4DD0E1;font-weight:600">👦 ${v.male} &nbsp; 👧 ${v.female}</span>
+            <span style="font-size:1.05rem;font-weight:900;color:#00838F">${v.total}<span style="font-size:.72rem;margin-left:2px">명</span></span>
+          </div>
+        </div>`).join('');
+    summaryWrap.style.display='block';
+  }else{
+    summaryWrap.style.display='none';
+  }
 }
 
 function renderDailyStats(data,spaceName){
